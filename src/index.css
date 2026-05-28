@@ -1,0 +1,91 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-brand-primary: #14b8a6; /* Deep Elegant Teal */
+  --color-brand-secondary: #0f766e; /* Slate/Teal Dark Accent */
+  --color-brand-accent: #f59e0b; /* Golden Amber */
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  overflow-x: hidden;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: #020617;
+  color: #f1f5f9;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  width: 100%;
+  overflow-x: hidden;
+  margin: 0;
+  padding: 0;
+}
+
+/* Custom telemetry scrollbar for Elegant Dark */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(2, 6, 23, 0.5);
+}
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #14b8a6;
+}
+
+/* Theme helper overrides */
+.theme-light {
+  --bg-app: #f8fafc;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f1f5f9;
+  --bg-accent: #f1f5f9;
+  --border-color: #e2e8f0;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-tertiary: #94a3b8;
+}
+
+.theme-dark {
+  --bg-app: #020617; /* Slate 950 base */
+  --bg-card: #0b1329; /* Luxurious Slate/Teal 900 card background */
+  --bg-card-hover: #121b36; /* Slate 800 hover */
+  --bg-accent: #1e293b; /* Slate 700 */
+  --border-color: #1e293b;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-tertiary: #475569;
+}
+
+.gradient-brand {
+  background: linear-gradient(135deg, var(--color-brand-primary), var(--color-brand-secondary));
+}
+
+/* Elegant Dark Radial Telemetry Grid & Ambient gradients */
+.radial-dots-grid {
+  background-image: radial-gradient(rgba(20, 184, 166, 0.1) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.elegant-radial-bg {
+  background: radial-gradient(circle at center, #0f172a 0%, #020617 100%);
+}
+
