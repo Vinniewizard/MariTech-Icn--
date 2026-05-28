@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ShieldCheck, ChevronDown, Coins, HelpCircle, History, Moon, Sun, RefreshCw, Layers } from 'lucide-react';
+import { ShieldCheck, ChevronDown, Coins, HelpCircle, History, Moon, Sun, RefreshCw, Layers, Laptop } from 'lucide-react';
 import { Account } from '../types';
 
 interface HeaderProps {
@@ -9,6 +9,7 @@ interface HeaderProps {
   onOpenCashier: () => void;
   onOpenGuide: () => void;
   theme: 'dark' | 'light';
+  themeMode?: 'dark' | 'light' | 'auto';
   onToggleTheme: () => void;
   activeView: 'trade' | 'history' | 'stats';
   onSwitchView: (view: 'trade' | 'history' | 'stats') => void;
@@ -25,6 +26,7 @@ export default function Header({
   onOpenCashier,
   onOpenGuide,
   theme,
+  themeMode,
   onToggleTheme,
   activeView,
   onSwitchView,
@@ -113,9 +115,21 @@ export default function Header({
         <button
           onClick={onToggleTheme}
           className={`rounded-lg p-1 sm:p-1.5 transition-colors flex-shrink-0 ${theme === 'dark' ? 'text-slate-400 hover:text-white hover:bg-slate-900/50' : 'text-slate-500 hover:text-slate-900 hover:bg-white'}`}
-          title={theme === 'dark' ? 'Switch to Light' : 'Switch to Dark'}
+          title={
+            themeMode === 'auto'
+              ? 'Theme: Auto Preference (Click -> Dark)'
+              : themeMode === 'dark'
+              ? 'Theme: Dark (Click -> Light)'
+              : 'Theme: Light (Click -> Auto)'
+          }
         >
-          {theme === 'dark' ? <Sun className="h-3.5 w-3.5 sm:h-4.5 sm:w-4.5 text-brand-accent shadow-[0_0_10px_rgba(245,158,11,0.3)]" /> : <Moon className="h-3.5 w-3.5 sm:h-4.5 sm:w-4.5 text-indigo-500" />}
+          {themeMode === 'auto' ? (
+            <Laptop className="h-3.5 w-3.5 sm:h-4.5 sm:w-4.5 text-teal-400 animate-pulse" />
+          ) : themeMode === 'dark' ? (
+            <Moon className="h-3.5 w-3.5 sm:h-4.5 sm:w-4.5 text-indigo-400" />
+          ) : (
+            <Sun className="h-3.5 w-3.5 sm:h-4.5 sm:w-4.5 text-brand-accent shadow-[0_0_10px_rgba(245,158,11,0.3)]" />
+          )}
         </button>
 
         {/* Total balance displays */}

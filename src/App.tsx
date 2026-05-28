@@ -39,8 +39,39 @@ function initializeAssetHistory(assets: Asset[]): Record<string, Tick[]> {
 }
 
 export default function App() {
-  // Theme state: default sleek Light
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  // Theme state: support dark, light, auto modes
+  const [themeMode, setThemeMode] = useState<'dark' | 'light' | 'auto'>(() => {
+    return (localStorage.getItem('maritech_theme_mode') as 'dark' | 'light' | 'auto') || 'auto';
+  });
+
+  const [systemTheme, setSystemTheme] = useState<'dark' | 'light'>(() => {
+    if (typeof window !== 'undefined') {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    return 'dark'; // safe default
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = (e: MediaQueryListEvent) => {
+      setSystemTheme(e.matches ? 'dark' : 'light');
+    };
+    if (mediaQuery.addEventListener) {
+      mediaQuery.addEventListener('change', handleChange);
+    } else {
+      mediaQuery.addListener(handleChange);
+    }
+    return () => {
+      if (mediaQuery.removeEventListener) {
+        mediaQuery.removeEventListener('change', handleChange);
+      } else {
+        mediaQuery.removeListener(handleChange);
+      }
+    };
+  }, []);
+
+  const theme = themeMode === 'auto' ? systemTheme : themeMode;
 
   // Account states
   const [currentUser, setCurrentUser] = useState<any>(() => {
@@ -317,7 +348,19 @@ export default function App() {
 
   // Switch Theme selector
   const handleToggleTheme = () => {
-    setTheme(theme === 'dark' ? 'light' : 'dark');
+    let nextMode: 'dark' | 'light' | 'auto';
+    if (themeMode === 'dark') {
+      nextMode = 'light';
+    } else if (themeMode === 'light') {
+      nextMode = 'auto';
+    } else {
+      nextMode = 'dark';
+    }
+    setThemeMode(nextMode);
+    localStorage.setItem('maritech_theme_mode', nextMode);
+    
+    const modeLabel = nextMode === 'auto' ? 'Auto (OS Preference)' : nextMode.toUpperCase();
+    triggerToast(`Theme preference updated to ${modeLabel}.`, true);
   };
 
   // Switchees Demowrithe wallets
@@ -691,6 +734,7 @@ export default function App() {
         onOpenCashier={() => setIsCashierOpen(true)}
         onOpenGuide={() => setIsGuideOpen(true)}
         theme={theme}
+        themeMode={themeMode}
         onToggleTheme={handleToggleTheme}
         activeView={activeTabView}
         onSwitchView={handleSwitchView}
