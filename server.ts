@@ -1270,6 +1270,58 @@ Active technical indicator values: ${indicatorsString}.`}`;
     }
   });
 
+  // Admin endpoint - Get all transactions
+  app.get('/api/admin/transactions', async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    try {
+      const adminKey = req.headers['x-admin-key'];
+      if (adminKey !== process.env.ADMIN_KEY && adminKey !== 'admin-secret-key') {
+        return res.status(403).json({ success: false, message: 'Unauthorized' });
+      }
+
+      const db = getD1Database();
+      const pendingRes = await db.prepare("SELECT * FROM pending_deposits WHERE status = 'pending'").all();
+      const pendingDeposits = (pendingRes?.results || []).map((row: any) => ({
+        id: row.id,
+        userId: row.user_id,
+        amount: row.amount,
+        receiptPath: row.receipt_path,
+        message: row.message,
+        status: row.status,
+        createdAt: row.created_at,
+        paymentMethod: row.payment_method
+      }));
+
+      const authHeaders = { 'x-admin-key': adminKey };
+      const completedRes = await db.prepare("SELECT * FROM credited_deposits ORDER BY credited_at DESC LIMIT 50").all();
+      const completedDeposits = (completedRes?.results || []).map((row: any) => ({
+        txHash: row.tx_hash,
+        userId: row.user_id,
+        amount: row.amount,
+        coin: row.coin,
+        network: row.network,
+        creditedAt: row.credited_at
+      }));
+
+      const withdrawalsRes = await db.prepare("SELECT * FROM withdrawals ORDER BY created_at DESC LIMIT 50").all();
+      const withdrawals = (withdrawalsRes?.results || []).map((row: any) => ({
+        id: row.id,
+        userId: row.user_id,
+        amount: row.amount,
+        address: row.address,
+        coin: row.coin,
+        network: row.network,
+        status: row.status,
+        createdAt: row.created_at,
+        paymentMethod: row.payment_method
+      }));
+
+      return res.json({ success: true, pendingDeposits, completedDeposits, withdrawals });
+    } catch (error: any) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   // Admin endpoint - Get pending deposits
   app.get('/api/admin/pending-deposits', async (req, res) => {
     res.setHeader('Content-Type', 'application/json');

@@ -34,6 +34,27 @@ interface PendingDeposit {
   createdAt: string;
 }
 
+interface CompletedDeposit {
+  txHash: string;
+  userId: string;
+  amount: number;
+  coin: string;
+  network: string;
+  creditedAt: string;
+}
+
+interface Withdrawal {
+  id: string;
+  userId: string;
+  amount: number;
+  address: string;
+  coin: string;
+  network: string;
+  status: string;
+  createdAt: string;
+  paymentMethod?: string;
+}
+
 interface GameSettings {
   globalTrendBias: number;
   forceOutcome?: 'win' | 'loss' | '';
@@ -49,31 +70,53 @@ export default function AdminDashboard({ isOpen, onClose, theme }: AdminDashboar
   const [loginMethod, setLoginMethod] = useState<'creds' | 'key'>('creds');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'stats' | 'users' | 'deposits' | 'game'>('stats');
+  const [activeTab, setActiveTab] = useState<'stats' | 'users' | 'deposits' | 'withdrawals' | 'game'>('stats');
   const [pendingDeposits, setPendingDeposits] = useState<PendingDeposit[]>([]);
+  const [completedDeposits, setCompletedDeposits] = useState<CompletedDeposit[]>([]);
+  const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
   const [gameSettings, setGameSettings] = useState<GameSettings>({ globalTrendBias: 0, volatilityMultiplier: 1 });
   const [isGameLoading, setIsGameLoading] = useState(false);
   const [editingUser, setEditingUser] = useState<User & { newPassword?: string } | null>(null);
 
+  // Poll for real-time updates every 10 seconds while authenticated
+  useEffect(() => {
+    if (!isOpen || !isAuthenticated || activeTab === 'game' || activeTab === 'stats' || activeTab === 'users') return;
+    
+    const intervalId = setInterval(() => {
+      fetch('/api/admin/transactions', { headers: { 'x-admin-key': adminKey } })
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) {
+            setPendingDeposits(data.pendingDeposits || []);
+            setCompletedDeposits(data.completedDeposits || []);
+            setWithdrawals(data.withdrawals || []);
+          }
+        });
+    }, 10000);
+    return () => clearInterval(intervalId);
+  }, [isOpen, isAuthenticated, adminKey, activeTab]);
+
   const fetchData = async (key: string) => {
     setLoading(true);
     try {
-      const [usersRes, statsRes, pendingRes, gameRes] = await Promise.all([
+      const [usersRes, statsRes, transRes, gameRes] = await Promise.all([
         fetch('/api/admin/users', { headers: { 'x-admin-key': key } }),
         fetch('/api/admin/stats', { headers: { 'x-admin-key': key } }),
-        fetch('/api/admin/pending-deposits', { headers: { 'x-admin-key': key } }),
+        fetch('/api/admin/transactions', { headers: { 'x-admin-key': key } }),
         fetch('/api/admin/game-settings', { headers: { 'x-admin-key': key } })
       ]);
 
       if (usersRes.ok && statsRes.ok) {
         const usersData = await usersRes.json();
         const statsData = await statsRes.json();
-        const pendingData = await pendingRes.json();
+        const transData = await transRes.json();
         const gameData = await gameRes.json();
 
         setUsers(usersData.users);
         setStats(statsData.stats);
-        setPendingDeposits(pendingData.deposits || []);
+        setPendingDeposits(transData.pendingDeposits || []);
+        setCompletedDeposits(transData.completedDeposits || []);
+        setWithdrawals(transData.withdrawals || []);
         setGameSettings(gameData.settings || { globalTrendBias: 0, volatilityMultiplier: 1 });
         setIsAuthenticated(true);
       } else {
@@ -308,14 +351,16 @@ export default function AdminDashboard({ isOpen, onClose, theme }: AdminDashboar
                 { id: 'stats', label: 'Overview', icon: TrendingUp },
                 { id: 'users', label: 'Users', icon: Users },
                 { id: 'deposits', label: 'Pending Deposits', icon: ArrowDownCircle },
+                { id: 'completed_deposits', label: 'Completed Deposits', icon: ArrowDownCircle },
+                { id: 'withdrawals', label: 'Withdrawals', icon: ArrowDownCircle },
                 { id: 'game', label: 'Game Control', icon: DollarSign }
               ].map(tab => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id as any)}
-                  className={`flex items-center gap-1.5 px-4 py-2 text-xs font-bold uppercase transition-all rounded ${
+                  className={`flex items-center gap-1.5 px-4 py-2 text-xs font-bold uppercase whitespace-nowrap transition-all rounded ${
                     activeTab === tab.id
-                      ? 'bg-yellow-500 text-white shadow-lg'
+                      ? 'bg-yellow-500 text-slate-950 shadow-lg'
                       : 'text-slate-500 hover:text-white hover:bg-slate-900'
                   }`}
                 >
@@ -560,6 +605,84 @@ export default function AdminDashboard({ isOpen, onClose, theme }: AdminDashboar
                           </div>
                         </div>
                       ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeTab === 'completed_deposits' && (
+                <div className="space-y-4">
+                  <h3 className="text-lg font-bold">Completed Deposits</h3>
+                  {completedDeposits.length === 0 ? (
+                    <div className="p-8 text-center text-slate-500 font-bold border border-slate-800 rounded-lg">
+                      No completed deposits found.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-sm border-collapse">
+                        <thead>
+                          <tr className="bg-slate-900 border-b border-slate-800 text-[10px] uppercase text-slate-400 tracking-wider">
+                            <th className="p-3 font-bold">User</th>
+                            <th className="p-3 font-bold text-right">Amount</th>
+                            <th className="p-3 font-bold">Coin/Network</th>
+                            <th className="p-3 font-bold">Tx Hash</th>
+                            <th className="p-3 font-bold">Date</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {completedDeposits.map(d => (
+                            <tr key={d.txHash} className="border-b border-slate-800/50 hover:bg-slate-900/30 transition-colors">
+                              <td className="p-3 font-mono text-xs max-w-[150px] truncate">{d.userId}</td>
+                              <td className="p-3 text-right font-bold text-green-500">${d.amount}</td>
+                              <td className="p-3 text-xs">{d.coin} / {d.network}</td>
+                              <td className="p-3 font-mono text-[10px] text-slate-500 max-w-[150px] truncate">{d.txHash}</td>
+                              <td className="p-3 text-xs">{new Date(d.creditedAt).toLocaleString()}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeTab === 'withdrawals' && (
+                <div className="space-y-4">
+                  <h3 className="text-lg font-bold">Withdrawals</h3>
+                  {withdrawals.length === 0 ? (
+                    <div className="p-8 text-center text-slate-500 font-bold border border-slate-800 rounded-lg">
+                      No withdrawals found.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-sm border-collapse">
+                        <thead>
+                          <tr className="bg-slate-900 border-b border-slate-800 text-[10px] uppercase text-slate-400 tracking-wider">
+                            <th className="p-3 font-bold">User</th>
+                            <th className="p-3 font-bold text-right">Amount</th>
+                            <th className="p-3 font-bold">Method</th>
+                            <th className="p-3 font-bold">Destination</th>
+                            <th className="p-3 font-bold">Status</th>
+                            <th className="p-3 font-bold">Date</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {withdrawals.map(w => (
+                            <tr key={w.id} className="border-b border-slate-800/50 hover:bg-slate-900/30 transition-colors">
+                              <td className="p-3 font-mono text-xs max-w-[150px] truncate">{w.userId}</td>
+                              <td className="p-3 text-right font-bold text-red-500">${w.amount}</td>
+                              <td className="p-3 text-xs uppercase">{w.paymentMethod || 'Crypto'} ({w.coin})</td>
+                              <td className="p-3 font-mono text-[10px] text-slate-500 max-w-[150px] truncate">{w.address}</td>
+                              <td className="p-3 text-[10px] font-bold uppercase">
+                                <span className={`px-2 py-1 rounded-full ${w.status === 'pending' ? 'bg-yellow-500/10 text-yellow-500 block w-max' : w.status === 'paid' ? 'bg-green-500/10 text-green-500 block w-max' : 'bg-slate-800 text-slate-400 block w-max'}`}>
+                                  {w.status}
+                                </span>
+                              </td>
+                              <td className="p-3 text-xs">{new Date(w.createdAt).toLocaleString()}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   )}
                 </div>
