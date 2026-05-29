@@ -639,9 +639,8 @@ Active technical indicator values: ${indicatorsString}.`}`;
           isSandbox: false
         });
       } catch (reqError: any) {
-        // Fall back to sandbox gracefully for any error, but supply the concrete error description
-        console.warn('NOWPayments API key/connection error. Falling back to sandbox/mock payment:', reqError.message);
-        return res.json(createSandboxMock(reqError.message));
+        console.error('NOWPayments API key/connection error:', reqError.message);
+        return res.status(500).json({ success: false, message: reqError.message });
       }
     } catch (error: any) {
       console.error('NOWPayments Create Payment Error:', error);
@@ -663,13 +662,13 @@ Active technical indicator values: ${indicatorsString}.`}`;
       let status: any;
 
       if (pIdStr.startsWith('sb-')) {
-        // Sandbox mock processing: fetch transaction details from session, instantly confirm and credit
+        // Sandbox mock processing: fetch transaction details from session, return waiting by default
         const session = paymentSessions.get(pIdStr);
         const amountToCredit = session ? session.amount : 100;
         const currentCoin = session ? session.coin : 'BTC';
 
         status = {
-          payment_status: 'finished',
+          payment_status: 'waiting',
           payin_hash: `sb-tx-${Date.now()}`,
           actually_paid: amountToCredit,
           price_amount: amountToCredit,
@@ -679,14 +678,8 @@ Active technical indicator values: ${indicatorsString}.`}`;
         try {
           status = await nowPaymentsRequest('GET', `/payment/${paymentId}`);
         } catch (verifyError: any) {
-          console.warn('NOWPayments verify error. Simulating fallback finish status:', verifyError.message);
-          status = {
-            payment_status: 'finished',
-            payin_hash: `sb-tx-fallback-${Date.now()}`,
-            actually_paid: 100,
-            price_amount: 100,
-            pay_currency: 'BTC'
-          };
+          console.warn('NOWPayments verify error:', verifyError.message);
+          return res.status(500).json({ success: false, message: 'Failed to verify payment with NOWPayments. Please try again.' });
         }
       }
 

@@ -50,6 +50,7 @@ export default function CashierModal({
   const [apiError, setApiError] = useState('');
   const [paymentStatus, setPaymentStatus] = useState<string>('');
   const [sandboxReason, setSandboxReason] = useState<string>('');
+  const [isPolling, setIsPolling] = useState(false);
 
   const isKenya = currentUser?.country?.toLowerCase() === 'kenya';
   const isCryptoRoute = paymentMethod === 'nowpayments';
@@ -144,6 +145,52 @@ export default function CashierModal({
       setIsAddressLoading(false);
     }
   };
+
+  // Background polling for pending cryptocurrency deposits every 10 seconds
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'deposit' || paymentMethod !== 'nowpayments' || !depositAddress?.paymentId || successMsg) {
+      return;
+    }
+
+    let intervalId: NodeJS.Timeout;
+    let isChecking = false;
+
+    const checkDepositStatus = async () => {
+      if (isChecking) return;
+      isChecking = true;
+      setIsPolling(true);
+
+      const userId = currentUser?.id || currentUser?.email || account.id;
+      try {
+        const response = await fetch(`/api/cashier/verify-deposit?paymentId=${depositAddress.paymentId}&userId=${userId}`);
+        const data = await readApiResponse(response);
+        
+        if (response.ok && data.success) {
+          const creditedAmount = Number(data.creditedAmount) || amount;
+          onDeposit(creditedAmount);
+          setSuccessMsg(`Deposit successful! $${creditedAmount.toLocaleString()} has been credited to your wallet.`);
+          setDepositAddress(null);
+          setSandboxReason('');
+        } else {
+          if (data.status) {
+            setPaymentStatus(data.status);
+          }
+        }
+      } catch (error: any) {
+        console.warn('Silent background check warning:', error.message);
+      } finally {
+        isChecking = false;
+        setIsPolling(false);
+      }
+    };
+
+    // Begin check after 10s and recheck every 10s
+    intervalId = setInterval(checkDepositStatus, 10000);
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [isOpen, activeTab, paymentMethod, depositAddress?.paymentId, successMsg, currentUser, account.id, amount, onDeposit]);
 
   if (!isOpen) return null;
 
@@ -623,6 +670,26 @@ export default function CashierModal({
                                 Equals exactly <strong className="text-white">${amount} USD</strong> at current real-time market rate.
                               </p>
                             </div>
+                          </div>
+
+                          {/* Background status checker UI indicator */}
+                          <div className={`flex items-center justify-between p-3 rounded-xl border select-none transition-all ${
+                            theme === 'dark' 
+                              ? 'bg-slate-900/40 border-slate-800/80 shadow-inner' 
+                              : 'bg-slate-50 border-slate-200'
+                          }`}>
+                            <div className="flex items-center space-x-2.5">
+                              <span className="relative flex h-2 w-2">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500" />
+                              </span>
+                              <span className="text-[10px] font-bold text-slate-700 dark:text-slate-200">
+                                {isPolling ? 'Checking transfer on blockchain...' : 'Monitoring incoming payment...'}
+                              </span>
+                            </div>
+                            <span className="font-mono text-[9px] text-cyan-500 font-extrabold uppercase tracking-wide animate-pulse">
+                              Auto-verifying (10s)
+                            </span>
                           </div>
 
                           {/* Info footer */}
