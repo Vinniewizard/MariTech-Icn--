@@ -20,6 +20,7 @@ export default function AuthModal({ isOpen, onClose, theme, onSuccess }: AuthMod
   // Form states
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [country, setCountry] = useState('Kenya');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
@@ -30,56 +31,77 @@ export default function AuthModal({ isOpen, onClose, theme, onSuccess }: AuthMod
     setFormError('');
     setIsLoading(true);
     
-    // Simulate API call
-    setTimeout(() => {
-      const users = JSON.parse(localStorage.getItem('maritech_users') || '[]');
-
-      if (view === 'register') {
-        const exists = users.find((u: any) => u.email === email || u.phone === phone);
-        if (exists) {
-          setFormError('User already registered with this email or phone.');
-          setIsLoading(false);
-          return;
-        }
-
-        // Phone number should be exactly 10 starting with either 254 or 07
-        if (!/^(07\d{8}|254\d{7})$/.test(phone)) {
-          setFormError('Phone number must be exactly 10 digits starting with 254 or 07.');
-          setIsLoading(false);
-          return;
-        }
-
-        const newUser = { email, phone, password };
-        users.push(newUser);
-        localStorage.setItem('maritech_users', JSON.stringify(users));
-
-        setSuccessMsg('Account created successfully!');
+    if (view === 'register') {
+      // Phone number should be exactly 10 starting with either 254 or 07
+      if (!/^(07\d{8}|254\d{7})$/.test(phone)) {
+        setFormError('Phone number must be exactly 10 digits starting with 254 or 07.');
         setIsLoading(false);
+        return;
+      }
+
+      fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, phone, password, fullName: email.split('@')[0], country })
+      })
+      .then(async (res) => {
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.message || 'Registration failed.');
+        }
+        return data;
+      })
+      .then((data) => {
+        setSuccessMsg(data.message || 'Account created successfully!');
+        setIsLoading(false);
+        localStorage.setItem('maritech_current_user', JSON.stringify(data.user));
+        localStorage.setItem('maritech_token', data.token);
         setTimeout(() => {
-          onSuccess(newUser);
+          onSuccess(data.user);
           onClose();
           setSuccessMsg('');
         }, 1500);
-      } else if (view === 'login') {
-        const user = users.find((u: any) => u.email === email && u.password === password);
-        if (!user) {
-          setFormError('Invalid email or password.');
-          setIsLoading(false);
-          return;
-        }
-
+      })
+      .catch((err) => {
+        setFormError(err.message || 'Network error occurred. Please try again.');
         setIsLoading(false);
-        onSuccess(user);
+      });
+
+    } else if (view === 'login') {
+      fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      })
+      .then(async (res) => {
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.message || 'Invalid email or password.');
+        }
+        return data;
+      })
+      .then((data) => {
+        setIsLoading(false);
+        localStorage.setItem('maritech_current_user', JSON.stringify(data.user));
+        localStorage.setItem('maritech_token', data.token);
+        onSuccess(data.user);
         onClose();
-      } else if (view === 'forgot_password') {
+      })
+      .catch((err) => {
+        setFormError(err.message || 'Network error occurred. Please try again.');
+        setIsLoading(false);
+      });
+
+    } else if (view === 'forgot_password') {
+      setTimeout(() => {
         setIsLoading(false);
         setSuccessMsg('Instructions sent to your email.');
         setTimeout(() => {
           setView('login');
           setSuccessMsg('');
         }, 3000);
-      }
-    }, 1000);
+      }, 1000);
+    }
   };
 
   const switchView = (newView: AuthView) => {
@@ -88,6 +110,7 @@ export default function AuthModal({ isOpen, onClose, theme, onSuccess }: AuthMod
     setFormError('');
     setEmail('');
     setPhone('');
+    setCountry('Kenya');
     setPassword('');
     setConfirmPassword('');
     setShowPassword(false);
@@ -196,6 +219,34 @@ export default function AuthModal({ isOpen, onClose, theme, onSuccess }: AuthMod
                       placeholder="+1 (555) 000-0000"
                     />
                   </div>
+                </div>
+              )}
+
+              {/* Country Field - Only for register */}
+              {view === 'register' && (
+                <div className="space-y-1">
+                  <label className={`text-xs font-semibold uppercase tracking-wider ${isDark ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                    Country
+                  </label>
+                  <select
+                    value={country}
+                    onChange={(e) => setCountry(e.target.value)}
+                    className={`block w-full px-3 py-2.5 rounded-lg text-sm transition-all focus:ring-2 focus:ring-indigo-500 focus:outline-none ${
+                      isDark 
+                        ? 'bg-zinc-950 border-zinc-800 text-white focus:border-indigo-500' 
+                        : 'bg-zinc-50 border-zinc-200 text-zinc-900 focus:border-indigo-500'
+                    } border cursor-pointer`}
+                  >
+                    <option value="Kenya">Kenya</option>
+                    <option value="Uganda">Uganda</option>
+                    <option value="Tanzania">Tanzania</option>
+                    <option value="Nigeria">Nigeria</option>
+                    <option value="South Africa">South Africa</option>
+                    <option value="United States">United States</option>
+                    <option value="United Kingdom">United Kingdom</option>
+                    <option value="Germany">Germany</option>
+                    <option value="Other">Other Country</option>
+                  </select>
                 </div>
               )}
 

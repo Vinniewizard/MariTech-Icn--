@@ -17,6 +17,286 @@ const __dirname = __filename ? path.dirname(__filename) : process.cwd();
 const cashierLedgerPath = path.join(process.cwd(), 'cashier-ledger.json');
 const uploadDir = path.join(process.cwd(), 'uploads');
 
+// Node.js SQLite integration mimicking Cloudflare D1
+import { DatabaseSync } from 'node:sqlite';
+import pg from 'pg';
+const { Pool } = pg;
+
+let pgPoolInstance: pg.Pool | null = null;
+let d1DbInstance: any = null;
+
+function convertQueryPlaceholders(query: string): string {
+  let index = 1;
+  return query.replace(/\?/g, () => `$${index++}`);
+}
+
+function getD1Database() {
+  if (d1DbInstance) return d1DbInstance;
+
+  const dbUrl = process.env.DATABASE_URL;
+  const isPostgres = dbUrl && (dbUrl.startsWith('postgres://') || dbUrl.startsWith('postgresql://'));
+
+  if (isPostgres) {
+    console.log(`[Database Setup] Connecting to cloud PostgreSQL database.`);
+    if (!pgPoolInstance) {
+      pgPoolInstance = new Pool({
+        connectionString: dbUrl,
+        ssl: { rejectUnauthorized: false }
+      });
+    }
+
+    // Bootstrap PostgreSQL schema
+    const runPostgresBootstrap = async () => {
+      const client = await pgPoolInstance!.connect();
+      try {
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            full_name TEXT,
+            account_type TEXT DEFAULT 'demo',
+            demo_balance REAL DEFAULT 10000.00,
+            real_balance REAL DEFAULT 0.00,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_login TEXT
+          );
+
+          CREATE TABLE IF NOT EXISTS user_sessions (
+            session_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            token TEXT UNIQUE NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+          );
+
+          CREATE TABLE IF NOT EXISTS user_profiles (
+            user_id TEXT PRIMARY KEY,
+            phone TEXT,
+            country TEXT,
+            verification_status TEXT DEFAULT 'unverified',
+            two_factor_enabled INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+          );
+
+          CREATE TABLE IF NOT EXISTS credited_deposits (
+            tx_hash TEXT PRIMARY KEY,
+            amount REAL NOT NULL,
+            coin TEXT NOT NULL,
+            network TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            credited_at TEXT NOT NULL
+          );
+
+          CREATE TABLE IF NOT EXISTS withdrawals (
+            withdraw_order_id TEXT PRIMARY KEY,
+            amount REAL NOT NULL,
+            coin TEXT NOT NULL,
+            network TEXT NOT NULL,
+            address TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            requested_at TEXT NOT NULL,
+            binance_id TEXT
+          );
+
+          CREATE TABLE IF NOT EXISTS pending_deposits (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            amount REAL NOT NULL,
+            receipt_path TEXT,
+            message TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            payment_method TEXT NOT NULL
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+          CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
+          CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(token);
+        `);
+        console.log('[Database Setup] PostgreSQL schema and migrations complete.');
+      } catch (err) {
+        console.error('[Database Setup] Error running PostgreSQL migrations:', err);
+      } finally {
+        client.release();
+      }
+    };
+    runPostgresBootstrap();
+
+    class PostgresPreparedStatement {
+      private query: string;
+      private boundValues: any[] = [];
+
+      constructor(query: string) {
+        this.query = query;
+      }
+
+      bind(...values: any[]) {
+        this.boundValues = values.map((v) => (v === undefined ? null : v));
+        return this;
+      }
+
+      async first<T = any>(): Promise<T | null> {
+        const pgQuery = convertQueryPlaceholders(this.query);
+        const res = await pgPoolInstance!.query(pgQuery, this.boundValues);
+        return res.rows.length > 0 ? (res.rows[0] as T) : null;
+      }
+
+      async run(): Promise<{ success: boolean }> {
+        const pgQuery = convertQueryPlaceholders(this.query);
+        await pgPoolInstance!.query(pgQuery, this.boundValues);
+        return { success: true };
+      }
+
+      async all<T = any>(): Promise<{ results: T[] }> {
+        const pgQuery = convertQueryPlaceholders(this.query);
+        const res = await pgPoolInstance!.query(pgQuery, this.boundValues);
+        return { results: res.rows as T[] };
+      }
+    }
+
+    d1DbInstance = {
+      prepare(query: string) {
+        return new PostgresPreparedStatement(query);
+      },
+      exec(query: string) {
+        return pgPoolInstance!.query(query);
+      }
+    };
+
+    return d1DbInstance;
+  }
+
+  // SQLite fallback
+  const dbPath = path.join(process.cwd(), 'maritech.db');
+  console.log(`[D1 Setup] Connecting to SQLite database at: ${dbPath}`);
+
+  try {
+    const rawDb = new DatabaseSync(dbPath);
+
+    // Bootstrap migrations to simulate D1 Database schema
+    rawDb.exec(`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        full_name TEXT,
+        account_type TEXT DEFAULT 'demo',
+        demo_balance REAL DEFAULT 10000.00,
+        real_balance REAL DEFAULT 0.00,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        last_login TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS user_sessions (
+        session_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        token TEXT UNIQUE NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS user_profiles (
+        user_id TEXT PRIMARY KEY,
+        phone TEXT,
+        country TEXT,
+        verification_status TEXT DEFAULT 'unverified',
+        two_factor_enabled INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS credited_deposits (
+        tx_hash TEXT PRIMARY KEY,
+        amount REAL NOT NULL,
+        coin TEXT NOT NULL,
+        network TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        credited_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS withdrawals (
+        withdraw_order_id TEXT PRIMARY KEY,
+        amount REAL NOT NULL,
+        coin TEXT NOT NULL,
+        network TEXT NOT NULL,
+        address TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        requested_at TEXT NOT NULL,
+        binance_id TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS pending_deposits (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        amount REAL NOT NULL,
+        receipt_path TEXT,
+        message TEXT,
+        status TEXT DEFAULT 'pending',
+        created_at TEXT NOT NULL,
+        payment_method TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+      CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
+      CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(token);
+    `);
+
+    // Builder for prepared statements to replicate the Cloudflare D1 query API structure
+    class D1PreparedStatementNode {
+      private stmt: any;
+      private boundValues: any[] = [];
+
+      constructor(stmt: any) {
+        this.stmt = stmt;
+      }
+
+      bind(...values: any[]) {
+        this.boundValues = values.map((v) => (v === undefined ? null : v));
+        return this;
+      }
+
+      async first<T = any>(): Promise<T | null> {
+        const rows = this.stmt.all(...this.boundValues);
+        return rows.length > 0 ? (rows[0] as T) : null;
+      }
+
+      async run(): Promise<{ success: boolean }> {
+        this.stmt.run(...this.boundValues);
+        return { success: true };
+      }
+
+      async all<T = any>(): Promise<{ results: T[] }> {
+        const rows = this.stmt.all(...this.boundValues);
+        return { results: rows as T[] };
+      }
+    }
+
+    d1DbInstance = {
+      prepare(query: string) {
+        const stmt = rawDb.prepare(query);
+        return new D1PreparedStatementNode(stmt);
+      },
+      exec(query: string) {
+        return rawDb.exec(query);
+      }
+    };
+
+    console.log('[D1 Setup] SQLite database initialized and local schema sync complete.');
+    return d1DbInstance;
+  } catch (error: any) {
+    console.error('[D1 Setup] Failed to boot SQLite database:', error);
+    throw error;
+  }
+}
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, 'uploads/');
@@ -84,18 +364,30 @@ const emptyCashierLedger = (): CashierLedger => ({
   }
 });
 
+let memoryLedger: CashierLedger = emptyCashierLedger();
+
 async function loadCashierLedger(): Promise<CashierLedger> {
   try {
     const ledger = await fs.readFile(cashierLedgerPath, 'utf8');
-    return { ...emptyCashierLedger(), ...JSON.parse(ledger) };
+    const parsed = { ...emptyCashierLedger(), ...JSON.parse(ledger) };
+    memoryLedger = parsed;
+    return parsed;
   } catch (error: any) {
-    if (error?.code === 'ENOENT') return emptyCashierLedger();
-    throw error;
+    if (error?.code === 'ENOENT') {
+      return memoryLedger;
+    }
+    console.warn('Fallback to in-memory ledger due to read error:', error.message);
+    return memoryLedger;
   }
 }
 
 async function saveCashierLedger(ledger: CashierLedger) {
-  await fs.writeFile(cashierLedgerPath, `${JSON.stringify(ledger, null, 2)}\n`, 'utf8');
+  memoryLedger = ledger;
+  try {
+    await fs.writeFile(cashierLedgerPath, `${JSON.stringify(ledger, null, 2)}\n`, 'utf8');
+  } catch (error: any) {
+    console.warn('In-memory ledger updated. File write skipped (read-only environment):', error.message);
+  }
 }
 
 async function startServer() {
@@ -287,10 +579,20 @@ Active technical indicator values: ${indicatorsString}.`}`;
         let coinAmount = parsedAmount;
         if (coin === 'btc') coinAmount = parsedAmount * 0.000015;
         else if (coin === 'eth') coinAmount = parsedAmount * 0.0003;
+        else if (coin === 'usdt' || coin === 'usdttrc20') coinAmount = parsedAmount; // Stablecoins 1:1 with USD
 
         const paymentId = `sb-${Date.now()}-${userId}`;
         // Store session for subsequent verification checks
         paymentSessions.set(paymentId, { amount: parsedAmount, coin: coin.toUpperCase() });
+
+        let finalReason = 'NOWPayments Sandbox active. Simulated blockchain deposit address generated successfully.';
+        if (reason) {
+          if (reason.toLowerCase().includes('estimate')) {
+            finalReason = `NOWPayments API node returned rate estimation note: "${reason}". Seamlessly routed to secure MariTech Sandbox simulation.`;
+          } else {
+            finalReason = `Gateway response: "${reason}". Routed to secure live Sandbox simulation.`;
+          }
+        }
 
         return {
           success: true,
@@ -300,7 +602,7 @@ Active technical indicator values: ${indicatorsString}.`}`;
           coin: coin.toUpperCase(),
           status: 'waiting',
           isSandbox: true,
-          sandboxReason: reason || 'Demo sandbox credentials requested or key not configured.'
+          sandboxReason: finalReason
         };
       };
 
@@ -310,10 +612,14 @@ Active technical indicator values: ${indicatorsString}.`}`;
       }
 
       try {
+        // Map the user input coin selection to official NOWPayments currency codes
+        // 'usdt' stands for USDT on ERC20, which is represented by official ticker 'usdterc20'
+        const payCurrency = coin === 'usdt' ? 'usdterc20' : coin;
+
         const payment = await nowPaymentsRequest('POST', '/payment', {
           price_amount: parsedAmount,
           price_currency: 'usd',
-          pay_currency: coin,
+          pay_currency: payCurrency,
           order_id: `dep-${Date.now()}-${userId}`,
           order_description: `Deposit to MariTech Wallet for ${userId}`,
           ipn_callback_url: process.env.IPN_CALLBACK_URL // Optional but good for automation
@@ -381,30 +687,32 @@ Active technical indicator values: ${indicatorsString}.`}`;
       }
 
       if (status.payment_status === 'finished' || status.payment_status === 'confirmed' || status.payment_status === 'partially_paid') {
-        const ledger = await loadCashierLedger();
+        const db = getD1Database();
         const txHash = status.payin_hash || String(paymentId);
 
-        if (ledger.creditedDeposits[txHash]) {
+        // Check if already credited in database
+        const alreadyCredited = await db.prepare('SELECT tx_hash FROM credited_deposits WHERE tx_hash = ?').bind(txHash).first();
+        if (alreadyCredited) {
           return res.json({ success: true, message: 'Already credited.', alreadyCredited: true });
         }
 
         const actualAmount = Number(status.actually_paid) || Number(status.price_amount);
+        const now = new Date().toISOString();
 
-        ledger.creditedDeposits[txHash] = {
-          amount: actualAmount,
-          coin: status.pay_currency?.toUpperCase() || 'BTC',
-          userId: String(userId || 'anonymous'),
-          creditedAt: new Date().toISOString()
-        };
-
-        // Update user balance
-        const userEntry = Object.values(ledger.users || {}).find(u => u.id === userId || u.email === userId);
-        if (userEntry) {
-          userEntry.realBalance += actualAmount;
-          userEntry.updatedAt = new Date().toISOString();
+        // Check if user exists in the database
+        const user = await db.prepare('SELECT id, real_balance FROM users WHERE id = ? OR email = ?').bind(userId, userId).first();
+        if (!user) {
+          return res.status(404).json({ success: false, message: 'User not found in system database.' });
         }
 
-        await saveCashierLedger(ledger);
+        // Add to credited_deposits table
+        await db.prepare(
+          `INSERT INTO credited_deposits (tx_hash, amount, coin, network, user_id, credited_at)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        ).bind(txHash, actualAmount, status.pay_currency?.toUpperCase() || 'BTC', 'CRYPTO', user.id, now).run();
+
+        // Update user real_balance in SQL database
+        await db.prepare('UPDATE users SET real_balance = real_balance + ?, updated_at = ? WHERE id = ?').bind(actualAmount, now, user.id).run();
 
         return res.json({ 
           success: true, 
@@ -445,6 +753,16 @@ Active technical indicator values: ${indicatorsString}.`}`;
         return res.status(400).json({ success: false, message: 'Withdrawal address is required.' });
       }
 
+      const db = getD1Database();
+      const user = await db.prepare('SELECT id, real_balance FROM users WHERE id = ? OR email = ?').bind(userId, userId).first();
+      if (!user) {
+        return res.status(404).json({ success: false, message: 'User account not found.' });
+      }
+
+      if (user.real_balance < amount) {
+        return res.status(400).json({ success: false, message: 'Insufficient real balance to withdraw.' });
+      }
+
       // NOWPayments Payout API usually requires a specialized call or a separate setup.
       // For now, we'll implement it as a payout request with a sandbox fallback.
       let payoutId: string;
@@ -464,23 +782,17 @@ Active technical indicator values: ${indicatorsString}.`}`;
         console.warn('NOWPayments Payout API call failed. Falling back to sandbox withdrawal:', payoutError.message);
         payoutId = `po-sandbox-${Date.now()}`;
       }
-      const ledger = await loadCashierLedger();
-      ledger.withdrawals[payoutId] = {
-        amount,
-        coin: coin.toUpperCase(),
-        address,
-        userId: String(userId || 'anonymous'),
-        requestedAt: new Date().toISOString()
-      };
-      
-      // Withdraw from user balance immediately if it was from realBalance
-      const userEntry = Object.values(ledger.users || {}).find(u => u.id === userId || u.email === userId);
-      if (userEntry) {
-        userEntry.realBalance -= amount;
-        userEntry.updatedAt = new Date().toISOString();
-      }
 
-      await saveCashierLedger(ledger);
+      const now = new Date().toISOString();
+
+      // Insert into withdrawals table
+      await db.prepare(
+        `INSERT INTO withdrawals (withdraw_order_id, amount, coin, network, address, user_id, requested_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).bind(payoutId, amount, coin.toUpperCase(), 'CRYPTO', address, user.id, now).run();
+      
+      // Withdraw from user balance immediately in SQL database
+      await db.prepare('UPDATE users SET real_balance = real_balance - ?, updated_at = ? WHERE id = ?').bind(amount, now, user.id).run();
       
       return res.json({ 
         success: true, 
@@ -524,10 +836,11 @@ Active technical indicator values: ${indicatorsString}.`}`;
 
       // 2. Process only finished/confirmed payments
       if (payment_status === 'finished' || payment_status === 'confirmed') {
-        const ledger = await loadCashierLedger();
+        const db = getD1Database();
         const txHash = req.body.payin_hash || String(payment_id);
 
-        if (ledger.creditedDeposits[txHash]) {
+        const alreadyCredited = await db.prepare('SELECT tx_hash FROM credited_deposits WHERE tx_hash = ?').bind(txHash).first();
+        if (alreadyCredited) {
           return res.status(200).send('Already processed');
         }
 
@@ -536,22 +849,22 @@ Active technical indicator values: ${indicatorsString}.`}`;
         const userId = parts[parts.length - 1];
 
         const amount = Number(actually_paid);
+        const now = new Date().toISOString();
 
-        ledger.creditedDeposits[txHash] = {
-          amount,
-          coin: pay_currency?.toUpperCase() || 'BTC',
-          userId: String(userId),
-          creditedAt: new Date().toISOString()
-        };
+        const user = await db.prepare('SELECT id FROM users WHERE id = ? OR email = ?').bind(userId, userId).first();
+        if (user) {
+          // Add to credited_deposits table
+          await db.prepare(
+            `INSERT INTO credited_deposits (tx_hash, amount, coin, network, user_id, credited_at)
+             VALUES (?, ?, ?, ?, ?, ?)`
+          ).bind(txHash, amount, pay_currency?.toUpperCase() || 'BTC', 'CRYPTO', user.id, now).run();
 
-        const userEntry = Object.values(ledger.users || {}).find(u => u.id === userId || u.email === userId);
-        if (userEntry) {
-          userEntry.realBalance += amount;
-          userEntry.updatedAt = new Date().toISOString();
-          console.log(`[WEBHOOK] Successfully credited User ${userId} with $${amount}`);
+          // Update user real_balance in SQL database
+          await db.prepare('UPDATE users SET real_balance = real_balance + ?, updated_at = ? WHERE id = ?').bind(amount, now, user.id).run();
+          console.log(`[WEBHOOK] Successfully credited User ${user.id} with $${amount}`);
+        } else {
+          console.warn(`[WEBHOOK] Webhook skipped: User ${userId} could not be resolved in database!`);
         }
-
-        await saveCashierLedger(ledger);
       }
 
       res.status(200).send('OK');
@@ -567,22 +880,18 @@ Active technical indicator values: ${indicatorsString}.`}`;
     try {
       const { userId, amount, paymentMethod, message } = req.body;
       
-      const ledger = await loadCashierLedger();
-      if (!ledger.pendingDeposits) ledger.pendingDeposits = {};
-
+      const db = getD1Database();
       const depositId = `dep-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
-      ledger.pendingDeposits[depositId] = {
-        id: depositId,
-        userId: userId || 'anonymous',
-        amount: Number(amount),
-        receiptPath: req.file ? `/uploads/${req.file.filename}` : undefined,
-        message: message || undefined,
-        status: 'pending',
-        createdAt: new Date().toISOString(),
-        paymentMethod: paymentMethod || 'paybill'
-      };
+      const receiptPath = req.file ? `/uploads/${req.file.filename}` : null;
+      const now = new Date().toISOString();
 
-      await saveCashierLedger(ledger);
+      const user = await db.prepare('SELECT id FROM users WHERE id = ? OR email = ?').bind(userId, userId).first();
+      const finalUserId = user ? user.id : (userId || 'anonymous');
+
+      await db.prepare(
+        `INSERT INTO pending_deposits (id, user_id, amount, receipt_path, message, status, created_at, payment_method)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(depositId, finalUserId, Number(amount), receiptPath, message || null, 'pending', now, paymentMethod || 'paybill').run();
 
       return res.json({
         success: true,
@@ -601,46 +910,63 @@ Active technical indicator values: ${indicatorsString}.`}`;
   app.post('/api/auth/register', async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     try {
-      const { email, password, fullName } = req.body;
+      const { email, password, fullName, phone, country } = req.body;
       
       if (!email || !password) {
         return res.status(400).json({ success: false, message: 'Email and password are required.' });
+      }
+
+      const db = getD1Database();
+
+      // Check if email already registered
+      const existingUser = await db.prepare('SELECT id FROM users WHERE email = ?').bind(email).first();
+      if (existingUser) {
+        return res.status(409).json({ success: false, message: 'Email already registered.' });
+      }
+
+      // Check if phone number already registered (if provided)
+      if (phone) {
+        const existingPhone = await db.prepare('SELECT user_id FROM user_profiles WHERE phone = ?').bind(phone).first();
+        if (existingPhone) {
+          return res.status(409).json({ success: false, message: 'Phone number already registered.' });
+        }
       }
 
       const userId = `user-${crypto.randomBytes(8).toString('hex')}`;
       const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
       const now = new Date().toISOString();
 
-      const ledger = await loadCashierLedger();
-      if (!ledger.users) (ledger as any).users = {};
-      
-      if ((ledger as any).users[email]) {
-        return res.status(409).json({ success: false, message: 'Email already registered.' });
-      }
+      // Write to D1 database
+      await db.prepare(
+        `INSERT INTO users (id, email, password_hash, full_name, account_type, demo_balance, real_balance, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(userId, email, passwordHash, fullName || 'User', 'demo', 10000.0, 0.0, now, now).run();
 
-      (ledger as any).users[email] = {
-        id: userId,
-        email,
-        passwordHash,
-        fullName: fullName || 'User',
-        accountType: 'demo',
-        demoBalance: 10000,
-        realBalance: 0,
-        createdAt: now,
-        updatedAt: now
-      };
-
-      await saveCashierLedger(ledger);
+      await db.prepare(
+        `INSERT INTO user_profiles (user_id, phone, country, verification_status, two_factor_enabled, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).bind(userId, phone || null, country || 'Kenya', 'unverified', 0, now, now).run();
 
       const sessionToken = crypto.randomBytes(32).toString('hex');
-      
+      const sessionId = `sess-${crypto.randomBytes(8).toString('hex')}`;
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days validity
+
+      await db.prepare(
+        `INSERT INTO user_sessions (session_id, user_id, token, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?)`
+      ).bind(sessionId, userId, sessionToken, now, expiresAt).run();
+
       return res.json({
         success: true,
         message: 'Registration successful!',
         user: {
           id: userId,
           email,
-          fullName: fullName || 'User'
+          fullName: fullName || 'User',
+          phone: phone || '',
+          country: country || 'Kenya',
+          balance: 10000.0,
+          accountType: 'demo'
         },
         token: sessionToken
       });
@@ -660,28 +986,44 @@ Active technical indicator values: ${indicatorsString}.`}`;
         return res.status(400).json({ success: false, message: 'Email and password are required.' });
       }
 
-      const ledger = await loadCashierLedger();
-      const user = (ledger as any).users?.[email];
+      const db = getD1Database();
+      const user = await db.prepare('SELECT * FROM users WHERE email = ?').bind(email).first();
 
       if (!user) {
         return res.status(401).json({ success: false, message: 'Invalid email or password.' });
       }
 
       const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
-      if (passwordHash !== user.passwordHash) {
+      if (passwordHash !== user.password_hash) {
         return res.status(401).json({ success: false, message: 'Invalid email or password.' });
       }
 
+      const profile = await db.prepare('SELECT phone, country FROM user_profiles WHERE user_id = ?').bind(user.id).first();
+
       const sessionToken = crypto.randomBytes(32).toString('hex');
-      
+      const sessionId = `sess-${crypto.randomBytes(8).toString('hex')}`;
+      const now = new Date().toISOString();
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+      await db.prepare(
+        `INSERT INTO user_sessions (session_id, user_id, token, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?)`
+      ).bind(sessionId, user.id, sessionToken, now, expiresAt).run();
+
+      // Update last login
+      await db.prepare('UPDATE users SET last_login = ?, updated_at = ? WHERE id = ?').bind(now, now, user.id).run();
+
       return res.json({
         success: true,
         message: 'Login successful!',
         user: {
           id: user.id,
           email: user.email,
-          fullName: user.fullName,
-          balance: user.accountType === 'demo' ? user.demoBalance : user.realBalance
+          fullName: user.full_name,
+          phone: profile?.phone || '',
+          country: profile?.country || 'Kenya',
+          balance: user.account_type === 'demo' ? user.demo_balance : user.real_balance,
+          accountType: user.account_type
         },
         token: sessionToken
       });
@@ -700,14 +1042,15 @@ Active technical indicator values: ${indicatorsString}.`}`;
         return res.status(403).json({ success: false, message: 'Unauthorized' });
       }
 
-      const ledger = await loadCashierLedger();
-      const users = Object.values((ledger as any).users || {}).map((u: any) => ({
+      const db = getD1Database();
+      const usersRes = await db.prepare('SELECT id, email, full_name, demo_balance, real_balance, created_at FROM users').all();
+      const users = (usersRes?.results || []).map((u: any) => ({
         id: u.id,
         email: u.email,
-        fullName: u.fullName,
-        demoBalance: u.demoBalance,
-        realBalance: u.realBalance,
-        createdAt: u.createdAt
+        fullName: u.full_name,
+        demoBalance: u.demo_balance,
+        realBalance: u.real_balance,
+        createdAt: u.created_at
       }));
 
       return res.json({
@@ -730,11 +1073,12 @@ Active technical indicator values: ${indicatorsString}.`}`;
         return res.status(403).json({ success: false, message: 'Unauthorized' });
       }
 
-      const ledger = await loadCashierLedger();
-      const users = Object.values((ledger as any).users || {}) as any[];
-      const deposits = Object.values(ledger.creditedDeposits || {}) as any[];
+      const db = getD1Database();
+      const users = (await db.prepare('SELECT id FROM users').all())?.results || [];
+      const deposits = (await db.prepare('SELECT amount FROM credited_deposits').all())?.results || [];
+      const withdrawals = (await db.prepare('SELECT amount FROM withdrawals').all())?.results || [];
 
-      const totalDeposits = deposits.reduce((sum, d) => sum + d.amount, 0);
+      const totalDeposits = deposits.reduce((sum: number, d: any) => sum + d.amount, 0);
       const totalUsers = users.length;
 
       return res.json({
@@ -743,8 +1087,8 @@ Active technical indicator values: ${indicatorsString}.`}`;
           totalUsers,
           totalDeposits,
           totalDepositsCount: deposits.length,
-          totalWithdrawals: Object.keys(ledger.withdrawals || {}).length,
-          topDepositAmount: deposits.length > 0 ? Math.max(...deposits.map(d => d.amount)) : 0
+          totalWithdrawals: withdrawals.length,
+          topDepositAmount: deposits.length > 0 ? Math.max(...deposits.map((d: any) => d.amount)) : 0
         }
       });
     } catch (error: any) {
@@ -762,8 +1106,18 @@ Active technical indicator values: ${indicatorsString}.`}`;
         return res.status(403).json({ success: false, message: 'Unauthorized' });
       }
 
-      const ledger = await loadCashierLedger();
-      const pending = Object.values(ledger.pendingDeposits || {}).filter(d => d.status === 'pending');
+      const db = getD1Database();
+      const pendingRes = await db.prepare("SELECT * FROM pending_deposits WHERE status = 'pending'").all();
+      const pending = (pendingRes?.results || []).map((row: any) => ({
+        id: row.id,
+        userId: row.user_id,
+        amount: row.amount,
+        receiptPath: row.receipt_path,
+        message: row.message,
+        status: row.status,
+        createdAt: row.created_at,
+        paymentMethod: row.payment_method
+      }));
 
       return res.json({ success: true, deposits: pending });
     } catch (error: any) {
@@ -781,36 +1135,43 @@ Active technical indicator values: ${indicatorsString}.`}`;
       }
 
       const { depositId, action } = req.body; // action: 'approve' | 'decline'
-      const ledger = await loadCashierLedger();
-      const deposit = ledger.pendingDeposits?.[depositId];
+      const db = getD1Database();
 
+      const deposit = await db.prepare("SELECT * FROM pending_deposits WHERE id = ?").bind(depositId).first();
       if (!deposit) {
-        return res.status(404).json({ success: false, message: 'Deposit not found.' });
+        return res.status(404).json({ success: false, message: 'Deposit record not found.' });
       }
 
+      if (deposit.status !== 'pending') {
+        return res.status(400).json({ success: false, message: `Deposit has already been processed: ${deposit.status}` });
+      }
+
+      const now = new Date().toISOString();
+
       if (action === 'approve') {
-        deposit.status = 'approved';
-        
-        // Find user by ID or email
-        const userEntry = Object.values(ledger.users || {}).find(u => u.id === deposit.userId || u.email === deposit.userId);
-        if (userEntry) {
-          userEntry.realBalance += deposit.amount;
-          userEntry.updatedAt = new Date().toISOString();
+        // Find if user exists to credit balance
+        const user = await db.prepare("SELECT id FROM users WHERE id = ?").bind(deposit.user_id).first();
+        if (!user) {
+          return res.status(404).json({ success: false, message: 'The user associated with this deposit was not found.' });
         }
+
+        // Mark as approved
+        await db.prepare("UPDATE pending_deposits SET status = 'approved' WHERE id = ?").bind(depositId).run();
+        
+        // Credit the balance
+        await db.prepare("UPDATE users SET real_balance = real_balance + ?, updated_at = ? WHERE id = ?").bind(deposit.amount, now, user.id).run();
 
         // Add to credited deposits
         const txHash = `manual-${depositId}`;
-        ledger.creditedDeposits[txHash] = {
-          amount: deposit.amount,
-          coin: 'USD',
-          userId: deposit.userId,
-          creditedAt: new Date().toISOString()
-        };
+        await db.prepare(
+          `INSERT INTO credited_deposits (tx_hash, amount, coin, network, user_id, credited_at)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        ).bind(txHash, deposit.amount, 'USD', 'MPESA', user.id, now).run();
       } else {
-        deposit.status = 'declined';
+        // Mark as declined
+        await db.prepare("UPDATE pending_deposits SET status = 'declined' WHERE id = ?").bind(depositId).run();
       }
 
-      await saveCashierLedger(ledger);
       return res.json({ success: true, message: `Deposit ${action}d successfully.` });
     } catch (error: any) {
       return res.status(500).json({ success: false, message: error.message });

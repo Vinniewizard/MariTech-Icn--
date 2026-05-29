@@ -51,7 +51,19 @@ export default function CashierModal({
   const [paymentStatus, setPaymentStatus] = useState<string>('');
   const [sandboxReason, setSandboxReason] = useState<string>('');
 
+  const isKenya = currentUser?.country?.toLowerCase() === 'kenya';
   const isCryptoRoute = paymentMethod === 'nowpayments';
+
+  // Automatically lock payment option for non-Kenyan users to NOWPayments (crypto)
+  useEffect(() => {
+    if (isOpen) {
+      if (currentUser?.country?.toLowerCase() === 'kenya') {
+        setPaymentMethod('paybill');
+      } else {
+        setPaymentMethod('nowpayments');
+      }
+    }
+  }, [isOpen, currentUser]);
 
   useEffect(() => {
     if (!isOpen || activeTab !== 'deposit' || !isCryptoRoute) return;
@@ -325,34 +337,36 @@ export default function CashierModal({
               ))}
             </div>
 
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
-                Select payment route
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => selectPaymentMethod('paybill')}
-                  className={`rounded-lg border p-3 sm:p-2 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-2 sm:gap-1 ${
-                    paymentMethod === 'paybill' ? 'border-green-500 text-current bg-green-50/10' : 'border-slate-800 text-slate-400 hover:bg-slate-905'
-                  }`}
-                >
-                  <DollarSign className={`h-5 w-5 sm:h-4 sm:w-4 ${paymentMethod === 'paybill' ? 'text-green-500' : ''}`} />
-                  <span className="text-[10px] sm:text-[9px] font-bold">M-Pesa Paybill</span>
-                </button>
+            {isKenya && (
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                  Select payment route
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => selectPaymentMethod('paybill')}
+                    className={`rounded-lg border p-3 sm:p-2 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-2 sm:gap-1 ${
+                      paymentMethod === 'paybill' ? 'border-green-500 text-current bg-green-50/10' : 'border-slate-800 text-slate-400 hover:bg-slate-905'
+                    }`}
+                  >
+                    <DollarSign className={`h-5 w-5 sm:h-4 sm:w-4 ${paymentMethod === 'paybill' ? 'text-green-500' : ''}`} />
+                    <span className="text-[10px] sm:text-[9px] font-bold">M-Pesa Paybill</span>
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => selectPaymentMethod('nowpayments')}
-                  className={`rounded-lg border p-3 sm:p-2 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-2 sm:gap-1 ${
-                    paymentMethod === 'nowpayments' ? 'border-amber-500 text-current bg-amber-50/10' : 'border-slate-800 text-slate-400 hover:bg-slate-905'
-                  }`}
-                >
-                  <RefreshCw className={`h-5 w-5 sm:h-4 sm:w-4 ${paymentMethod === 'nowpayments' ? 'text-brand-accent' : ''}`} />
-                  <span className="text-[10px] sm:text-[9px] font-bold">NOWPayments</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => selectPaymentMethod('nowpayments')}
+                    className={`rounded-lg border p-3 sm:p-2 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-2 sm:gap-1 ${
+                      paymentMethod === 'nowpayments' ? 'border-amber-500 text-current bg-amber-50/10' : 'border-slate-800 text-slate-400 hover:bg-slate-905'
+                    }`}
+                  >
+                    <RefreshCw className={`h-5 w-5 sm:h-4 sm:w-4 ${paymentMethod === 'nowpayments' ? 'text-brand-accent' : ''}`} />
+                    <span className="text-[10px] sm:text-[9px] font-bold">NOWPayments</span>
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
             {isCryptoRoute && (
               <div className="space-y-3">
