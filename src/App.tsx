@@ -757,7 +757,7 @@ export default function App() {
       )}
 
       {/* 2. MAIN TRADERWORKSPACE */}
-      <main className="flex-1 flex flex-col p-3 md:p-4 gap-4 max-w-7xl mx-auto w-full">
+      <main className="flex-1 flex flex-col p-3 md:p-4 gap-4 max-w-7xl mx-auto w-full pt-[116px] md:pt-[88px]">
         <div className={`flex flex-wrap items-center justify-end rounded-xl p-3 border select-none gap-3 shrink-0 transition-colors ${
           theme === 'dark' ? 'bg-zinc-905 border-zinc-800 text-zinc-350' : 'bg-white border-gray-100 text-gray-500 shadow-sm'
         }`}>
