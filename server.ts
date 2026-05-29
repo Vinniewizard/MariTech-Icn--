@@ -114,6 +114,15 @@ function getD1Database() {
             payment_method TEXT NOT NULL
           );
 
+          CREATE TABLE IF NOT EXISTS password_resets (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            token TEXT UNIQUE NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            used INTEGER DEFAULT 0
+          );
+
           CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
           CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
           CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(token);
@@ -242,6 +251,15 @@ function getD1Database() {
         status TEXT DEFAULT 'pending',
         created_at TEXT NOT NULL,
         payment_method TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS password_resets (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        token TEXT UNIQUE NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        used INTEGER DEFAULT 0
       );
 
       CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
@@ -1046,6 +1064,80 @@ Active technical indicator values: ${indicatorsString}.`}`;
     } catch (error: any) {
       console.error('Login error:', error);
       return res.status(500).json({ success: false, message: error.message || 'Login failed' });
+    }
+  });
+
+  // Forgot password endpoint
+  app.post('/api/auth/forgot-password', async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    try {
+      const { email } = req.body;
+      if (!email) {
+        return res.status(400).json({ success: false, message: 'Email is required' });
+      }
+
+      const db = getD1Database();
+      const user = await db.prepare('SELECT id FROM users WHERE email = ?').bind(email).first();
+      
+      if (!user) {
+        return res.json({ success: true, message: 'If an account exists with this email, a reset link will be sent.' }); // Don't reveal user existence
+      }
+
+      const resetToken = crypto.randomBytes(32).toString('hex');
+      const resetId = `rst-${Date.now()}`;
+      const now = new Date().toISOString();
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 mins expiry
+
+      await db.prepare(`
+        INSERT INTO password_resets (id, user_id, token, created_at, expires_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).bind(resetId, user.id, resetToken, now, expiresAt).run();
+
+      // Simulate sending SMS/Email
+      console.log(`[SIMULATION] Sending password reset sequence (SMS/Email) to user ${user.id}. Token: ${resetToken}`);
+      
+      return res.json({ success: true, message: 'Password reset token has been sent to your email/SMS. (Check console for simulated token)' });
+    } catch (error: any) {
+      console.error('Forgot password error:', error);
+      return res.status(500).json({ success: false, message: 'Failed to process request.' });
+    }
+  });
+
+  // Reset password endpoint
+  app.post('/api/auth/reset-password', async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    try {
+      const { token, newPassword } = req.body;
+      if (!token || !newPassword) {
+        return res.status(400).json({ success: false, message: 'Token and new password required' });
+      }
+
+      const db = getD1Database();
+      const resetRecord = await db.prepare('SELECT * FROM password_resets WHERE token = ? AND used = 0').bind(token).first();
+      
+      if (!resetRecord) {
+        return res.status(400).json({ success: false, message: 'Invalid or expired token.' });
+      }
+
+      if (new Date(resetRecord.expires_at) < new Date()) {
+        return res.status(400).json({ success: false, message: 'Token has expired.' });
+      }
+
+      const passwordHash = crypto.createHash('sha256').update(newPassword).digest('hex');
+      const now = new Date().toISOString();
+
+      // Update password
+      await db.prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?')
+        .bind(passwordHash, now, resetRecord.user_id)
+        .run();
+
+      // Mark token as used
+      await db.prepare('UPDATE password_resets SET used = 1 WHERE id = ?').bind(resetRecord.id).run();
+
+      return res.json({ success: true, message: 'Password has been updated successfully. You can now login.' });
+    } catch (error: any) {
+      console.error('Reset password error:', error);
+      return res.status(500).json({ success: false, message: 'Failed to reset password.' });
     }
   });
 
