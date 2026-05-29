@@ -611,8 +611,7 @@ Active technical indicator values: ${indicatorsString}.`}`;
       };
 
       if (!hasValidKey) {
-        // Sandbox fallback flow - returns instantly a valid mock address and session
-        return res.json(createSandboxMock());
+        return res.status(400).json({ success: false, message: 'NOWPayments API key is missing or invalid.' });
       }
 
       try {
