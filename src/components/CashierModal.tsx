@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CreditCard, ArrowDownCircle, ArrowUpRight, DollarSign, Wallet2, Check, RefreshCw, X, Shield, History } from 'lucide-react';
+import { CreditCard, ArrowDownCircle, ArrowUpRight, DollarSign, Wallet2, Check, RefreshCw, X, Shield, History, Clock } from 'lucide-react';
 import { Account } from '../types';
 
 interface CashierModalProps {
@@ -534,21 +534,42 @@ export default function CashierModal({
                             {w.paymentMethod === 'paybill' ? 'M-PESA' : w.coin}
                           </td>
                           <td className="px-3 py-2.5 text-[10px]">
-                            {w.status === 'pending' && (
-                              <span className="flex items-center gap-1 text-yellow-500 bg-yellow-500/10 px-2 py-1 rounded-full w-max">
-                                <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse"></span> Pending
+                            <div className="flex items-center space-x-1.5 min-w-[120px]">
+                              {/* Pending Step */}
+                              <div className={`flex items-center justify-center rounded-full p-1 border ${
+                                w.status === 'pending' ? 'bg-yellow-500/10 border-yellow-500/30 text-yellow-500' : 
+                                'bg-green-500/10 border-green-500/30 text-green-500'
+                              }`} title="Pending">
+                                {w.status === 'pending' ? <Clock className="w-2.5 h-2.5 animate-pulse" /> : <Check className="w-2.5 h-2.5" />}
+                              </div>
+                              
+                              <div className={`h-px w-3 sm:w-4 ${w.status === 'pending' ? 'bg-slate-700' : 'bg-green-500/50'}`} />
+                              
+                              {/* Processing Step */}
+                              <div className={`flex items-center justify-center rounded-full p-1 border ${
+                                w.status === 'processing' ? 'bg-blue-500/10 border-blue-500/30 text-blue-500' : 
+                                (w.status === 'completed' || w.status === 'paid') ? 'bg-green-500/10 border-green-500/30 text-green-500' : 
+                                'bg-slate-800 border-slate-700 text-slate-500'
+                              }`} title="Processing">
+                                {w.status === 'processing' ? <RefreshCw className="w-2.5 h-2.5 animate-spin" /> : 
+                                 (w.status === 'completed' || w.status === 'paid') ? <Check className="w-2.5 h-2.5" /> : 
+                                 <RefreshCw className="w-2.5 h-2.5 opacity-40" />}
+                              </div>
+                              
+                              <div className={`h-px w-3 sm:w-4 ${(w.status === 'completed' || w.status === 'paid') ? 'bg-green-500/50' : 'bg-slate-700'}`} />
+                              
+                              {/* Completed Step */}
+                              <div className={`flex items-center justify-center rounded-full p-1 border ${
+                                (w.status === 'completed' || w.status === 'paid') ? 'bg-green-500/10 border-green-500/30 text-green-500' : 
+                                'bg-slate-800 border-slate-700 text-slate-500'
+                              }`} title="Completed">
+                                <Check className={`w-2.5 h-2.5 ${(w.status === 'completed' || w.status === 'paid') ? '' : 'opacity-40'}`} />
+                              </div>
+                              
+                              <span className="ml-2 font-bold capitalize hidden md:inline text-slate-300">
+                                {w.status}
                               </span>
-                            )}
-                            {w.status === 'processing' && (
-                              <span className="flex items-center gap-1 text-blue-500 bg-blue-500/10 px-2 py-1 rounded-full w-max">
-                                <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Processing
-                              </span>
-                            )}
-                            {w.status === 'completed' || w.status === 'paid' ? (
-                              <span className="flex items-center gap-1 text-green-500 bg-green-500/10 px-2 py-1 rounded-full w-max">
-                                <Check className="w-2.5 h-2.5" /> Completed
-                              </span>
-                            ) : null}
+                            </div>
                           </td>
                           <td className="px-3 py-2.5 text-right opacity-50 group-hover:opacity-100 transition-opacity">
                             <span className="truncate max-w-[80px] sm:max-w-[120px] inline-block">{w.address}</span>
@@ -630,7 +651,7 @@ export default function CashierModal({
                     }`}
                   >
                     <DollarSign className="h-5 w-5" />
-                    <span className="text-[10px] font-black">M-Pesa Paybill</span>
+                    <span className="text-[10px] font-black">{activeTab === 'deposit' ? 'M-Pesa Paybill' : 'M-Pesa'}</span>
                   </button>
 
                   <button
